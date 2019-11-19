@@ -26,11 +26,11 @@ public class SearchController {
     EsRestService esRestService;
 
     @ResponseBody
-    @RequestMapping("/search1")
-    public ArrayList<Map<String, Object>> result(@RequestParam(value = "keyword") String keyword,
+    @RequestMapping("/search_raw")
+    public List<Map<String, Object>> result(@RequestParam(value = "keyword") String keyword,
             @RequestParam(value = "pageNum", required = false) Integer pageNum) {
         return esRestService.searchByKeywordAndPageNum(keyword, pageNum);
-    }
+}
 
     @ResponseBody
     @RequestMapping("/search2")

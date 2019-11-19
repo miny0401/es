@@ -60,30 +60,46 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+
+/**
+ * @author huangwm@2345.com
+ * @date 2019/11/19
+ */
 @Service
 public class EsEngine {
     @Autowired
     EsConf esConf;
     private static Logger logger = LoggerFactory.getLogger(EsEngine.class);
-    private final int limit_day_num = 100;
     private static SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
     private Calendar calendar = Calendar.getInstance();
 
-    /* 获取elastic search rest client */
+    /**
+     * 索引资讯的日期范围
+     */
+    private final int limit_day_num = 1000;
+
+    /**
+     * 获取elastic search rest client
+     * @return RestHighLevelClient
+     */
     private RestHighLevelClient getEsRestClient() {
         return new RestHighLevelClient(
-                RestClient.builder(new HttpHost(esConf.getHost(), esConf.getPort(), esConf.getSchema())));
+            RestClient.builder(new HttpHost(esConf.getHost(), esConf.getPort(), esConf.getSchema())));
     }
 
-    /** 判断索引是否存在 */
-    public boolean existsIndex(String[] indexNames) {
+    /**
+     * 判断索引是否存在
+     * @param indexNames 索引列表
+     * @return Boolean
+     */
+    public Boolean existsIndex(String[] indexNames) {
         GetIndexRequest getIndexRequest = new GetIndexRequest();
         getIndexRequest.indices(indexNames);
         getIndexRequest.local(false);
         getIndexRequest.humanReadable(true);
         getIndexRequest.includeDefaults(true);
         //getIndexRequest.indicesOptions(IndicesOptions);
-        boolean ret = false;
+        Boolean ret = false;
         try{
             ret = getEsRestClient().indices().exists(getIndexRequest, RequestOptions.DEFAULT);
         } catch (Exception e) {
@@ -93,7 +109,11 @@ public class EsEngine {
         return ret;
     }
 
-    /** 获取索引信息 */
+    /**
+     * 获取索引信息 
+     * @param indexName 索引名称
+     * @return Map<String, String>
+     */
     public Map<String, String> getIndexInfo(String indexName) {
         if (!existsIndex(new String[]{indexName})) {
             logger.warn("Index '{}' not existed, cannot it's info!!!", indexName);
@@ -121,7 +141,14 @@ public class EsEngine {
         return indexInfo;
     }
 
-    /** 创建索引 */
+    /**
+     * 创建索引
+     * @param indexName 索引名称
+     * @param shardNum 分片数
+     * @param replicNum 备份数
+     * @param builder 属性builder
+     * @return Boolean
+     */
     public Boolean createIndex(String indexName,
                                int shardNum,
                                int replicNum,
@@ -135,7 +162,6 @@ public class EsEngine {
         request.settings(Settings.builder()
             .put("index.number_of_shards", Integer.toString(shardNum))
             .put("index.number_of_replicas", Integer.toString(replicNum)));
-        
         //request.mapping(builder); // version 7.4.2
         request.mapping("type", builder); // version 6.4.1
         CreateIndexResponse response;
@@ -150,9 +176,13 @@ public class EsEngine {
         return ret;
     }
 
-
-    /** 批量索引文档 */
-    public boolean indexDocs(String indexName,
+    /**
+     * 批量索引文档
+     * @param indexName 索引名称
+     * @param docList 文档列表
+     * @return Boolean
+     */
+    public Boolean indexDocs(String indexName,
                              List<String> docList) {
         if (!existsIndex(new String[]{indexName})) {
             logger.warn("Index '{}' not existed, cannot index it!!!", indexName);
@@ -164,7 +194,7 @@ public class EsEngine {
         }
         BulkRequest bulkRequest = new BulkRequest();
         Iterator<String> iter = docList.iterator();
-        boolean ret = false;
+        Boolean ret = false;
         while (iter.hasNext()) {
             String jsonString = iter.next();
             //IndexRequest indexRequest = new IndexRequest(indexName) // version 7.4.2
@@ -190,9 +220,12 @@ public class EsEngine {
         return ret;
     }
 
-
-    /** 删除索引 */
-    public boolean deleteIndex(String indexName) {
+    /**
+     * 删除索引
+     * @param indexName 索引名称
+     * @return Boolean
+     */
+    public Boolean deleteIndex(String indexName) {
         if (!existsIndex(new String[]{indexName})) {
             return true;
         }
@@ -200,7 +233,7 @@ public class EsEngine {
         DeleteIndexRequest deleteRequest = new DeleteIndexRequest(indexName);
         deleteRequest.timeout(TimeValue.timeValueSeconds(1));
         //deleteRequest.indicesOptions(IndicesOptions.lenientExpand());
-        boolean ret = false;
+        Boolean ret = false;
         try {
             AcknowledgedResponse deleteResponse = client.indices().delete(deleteRequest, RequestOptions.DEFAULT);
             ret = deleteResponse.isAcknowledged();
@@ -211,9 +244,16 @@ public class EsEngine {
         return ret;
     }
 
-
-
-    /** 搜索资讯 */
+    /**  */
+    /**
+     * 搜索资讯
+     * @param indexNames 索引列表
+     * @param keyword 搜索词
+     * @param fieldNames 搜索域
+     * @param pageNum 展示页数
+     * @param pageSize 每页展示的资讯数
+     * @return ArrayList<Map<String, Object>>
+     */
     public ArrayList<Map<String, Object>> searchDocs(String[] indexNames,
                                                      String keyword,
                                                      String[] fieldNames,
@@ -265,10 +305,16 @@ public class EsEngine {
         return resultList;
     }
 
-    /** 查询搜索到的数量 */
+    /**
+     * 查询搜索到的数量
+     * @param indexNames 索引名称列表
+     * @param keyword 搜索词
+     * @param fieldNames 搜索域
+     * @return Long
+     */
     /* version 7.4.2
-    public long getSearchCount(String[] indexNames, String keyword, String[] fieldNames) {
-        long count = 0L;
+    public Long getSearchCount(String[] indexNames, String keyword, String[] fieldNames) {
+        Long count = 0L;
         CountRequest countRequest = new CountRequest();
         CountResponse countResponse;
         countRequest.indices(indexNames);
@@ -293,7 +339,12 @@ public class EsEngine {
     }
     */
 
-    /** 创建多匹配builder */
+    /**
+     * 创建多匹配builder
+     * @param keyword 搜索词
+     * @param fieldNames 搜索域
+     * @return MultiMatchQueryBuilder
+     */
     private MultiMatchQueryBuilder multiMatchSearch(String keyword, String[] fieldNames) {
         MultiMatchQueryBuilder multiMatchQueryBuilder = QueryBuilders
             .multiMatchQuery(keyword, fieldNames)
@@ -302,7 +353,10 @@ public class EsEngine {
         return multiMatchQueryBuilder;
     }
 
-    /** 固定匹配和过滤(每次搜索都会应用的匹配和过滤规则) */
+    /**
+     * 固定匹配和过滤(每次搜索都会应用的匹配和过滤规则)
+     * @return BoolQueryBuilder 
+     */
     private BoolQueryBuilder fixMatchAndFilter(BoolQueryBuilder boolQueryBuilder) {
         // 日期过滤
         Date endDate = new Date();
@@ -312,7 +366,10 @@ public class EsEngine {
         return boolQueryBuilder;
     }
 
-    /** 创建高亮显示的builder */
+    /**
+     * 创建高亮显示的builder
+     * @return HighlightBuilder
+     */
     private HighlightBuilder getHighlightBuilder() {
         HighlightBuilder highlightBuilder = new HighlightBuilder();
         HighlightBuilder.Field hTitle = new HighlightBuilder.Field("title");
@@ -323,7 +380,12 @@ public class EsEngine {
         return highlightBuilder;
     }
 
-    /** 获取某一天的时间 */
+    /**
+     * 获取某一天的时间
+     * @param now 当前日期
+     * @param offset_day 与now相差的天数
+     * @return Date
+     */
     private Date getDate(Date now, int offset_day) {
         calendar.setTime(now);
         calendar.add(Calendar.DAY_OF_MONTH, offset_day);
