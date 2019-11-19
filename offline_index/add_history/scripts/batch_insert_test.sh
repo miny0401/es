@@ -15,8 +15,8 @@ spark-submit \
 es_batch_insert_offline.py --end_date '2019-10-15' \
                            --batch_size 10000 \
                            --days_num 1 \
-                           --news_index_name search_app_browser_news \
-                           --video_index_name search_app_browser_videos \
+                           --news_index_name app_browser_search_news \
+                           --video_index_name app_browser_search_videos \
                            --host 172.16.0.115:9200 \
                            --number_of_shards 3 \
                            --number_of_replicas 1 \

@@ -1,4 +1,4 @@
-package com.miny.bean;
+package com.miny.dto;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;

@@ -1,4 +1,4 @@
-package com.miny.bean;
+package com.miny.dto;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;

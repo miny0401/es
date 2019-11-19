@@ -6,7 +6,8 @@ import java.util.ArrayList;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.miny.bean.NewsDoc;
+import com.miny.dto.NewsDoc;
+import com.miny.engine.EsEngine;
 import com.miny.service.EsRestService;
 
 import org.apache.commons.csv.CSVFormat;
@@ -25,7 +26,7 @@ import org.springframework.stereotype.Component;
 public class SearchRunner implements ApplicationRunner {
     private static Logger logger = LoggerFactory.getLogger(SearchRunner.class);
     @Autowired(required = true)
-    EsRestService esRestService;
+    EsEngine esEngine;
     @Value("${runner.preload}")
     boolean preload;
 
@@ -34,11 +35,11 @@ public class SearchRunner implements ApplicationRunner {
         if (!preload) return;
         String indexName = "news";
         boolean ret;
-        ret = esRestService.deleteIndex(indexName);
+        ret = esEngine.deleteIndex(indexName);
         logger.info("Delete index '{}' {}.", indexName, ret ? "successfully":"failed");
-        ret = esRestService.createIndex(indexName, 3, 0, createBuilder());
+        ret = esEngine.createIndex(indexName, 3, 0, createBuilder());
         logger.info("Create index '{}' {}.", indexName, ret ? "successfully":"failed");
-        Map<String, String> indexInfo = esRestService.getIndexInfo(indexName);
+        Map<String, String> indexInfo = esEngine.getIndexInfo(indexName);
         logger.info("index info: {}.", indexInfo);
         // 读取文件数据
         ArrayList<String> docList = new ArrayList<>();
@@ -58,7 +59,7 @@ public class SearchRunner implements ApplicationRunner {
         int batch_num = (int)Math.ceil(docList.size() / batch_size);
         for (int i = 0; i < batch_num; i++){
             logger.info("Inserting doc {}/{}...", i, batch_num-1);
-            ret = esRestService.indexDocs(indexName, docList.subList(i*batch_size, (i+1)*batch_size));
+            ret = esEngine.indexDocs(indexName, docList.subList(i*batch_size, (i+1)*batch_size));
             logger.info("Insert index '{}' {}.", indexName, ret ? "successfully":"failed");
         }
     }

@@ -6,7 +6,7 @@ from pyspark import SparkConf
 from pyspark.sql import SparkSession
 from elasticsearch.helpers import bulk
 from elasticsearch_dsl import connections
-from elasticsearch_dsl import Index, Document, Text, Keyword, Date
+from elasticsearch_dsl import Index, Document, Text, Keyword, Date, Long
 
 
 def create_spark():
@@ -51,9 +51,9 @@ class Dataset(object):
 
     def _prepare_data(self):
         """获取相应的数据，并返回迭代器（以partition为单位）."""
-        df = self.spark.sql(f"select news_id,title,content,source,info_url,large_pic,"
-                            f"mini_pic,third_source,content_type,type,is_video,"
-                            f"create_time,dt from " +
+        df = self.spark.sql(f"select news_id,title,content,news_tag,source,info_url,https_url,"
+                            f"large_pic,mini_pic,third_source,content_type,type as news_type,"
+                            f"is_video,video_time,update_time,dt from " +
                             f"mlg.info_browser where dt>='{self.start_date}'" +
                             f" and dt<='{self.end_date}'")
         # 根据资讯源及视频源的要求过滤
@@ -95,16 +95,19 @@ class ElasticInsert(object):
             news_id = Keyword()
             title = Text()
             content = Text()
+            news_tag = Text()
             source = Keyword()
             info_url = Keyword()
+            https_url = Keyword()
             large_pic = Keyword()
             mini_pic = Keyword()
             third_source = Text()
             content_type = Keyword()
             news_type = Keyword()
             is_video = Keyword()
-            create_time = Date()
-            utc_create_time = Date()
+            video_time = Long()
+            update_time = Date()
+            utc_update_time = Date()
             dt = Date()
         self.News = News
 
@@ -137,39 +140,59 @@ def main(args):
         batch_news, batch_videos = [], []
         #batch_news_or_videos = []
         for row in batch_data:
+            # 转utc时间，方便在kibana中查询
             time_format = f'%Y-%m-%d %H:%M:%S'
-            ct_datetime = datetime.strptime(row.create_time, time_format)
-            utc_ct_datetime = ct_datetime - timedelta(hours=8)
+            ut_datetime = datetime.strptime(row.update_time, time_format)
+            utc_ut_datetime = ut_datetime - timedelta(hours=8)
+            # 解析 large_pic 和 mini_pic
+            large_pic, mini_pic = "", ""
+            large_pic_list = eval(row.large_pic.replace('\\', ''))
+            mini_pic_list = eval(row.mini_pic.replace('\\', ''))
+            for idx, large_pic_item in enumerate(large_pic_list):
+                large_pic += f"{large_pic_item['src']}"
+                if idx != len(large_pic_list) - 1:
+                    large_pic += ';'
+            for idx, mini_pic_item in enumerate(mini_pic_list):
+                mini_pic += f"{mini_pic_item['src']}"
+                if idx != len(mini_pic_list) - 1:
+                    mini_pic += ';'
+            # 创建文档
             if row.third_source in args.third_news_source:
                 doc = ei_news.News(news_id=row.news_id,
                                    title=row.title,
                                    content=row.content,
+                                   news_tag=row.news_tag,
                                    source=row.source,
                                    info_url=row.info_url,
-                                   large_pic=row.large_pic,
-                                   mini_pic=row.mini_pic,
+                                   https_url=row.https_url,
+                                   large_pic=large_pic,
+                                   mini_pic=mini_pic,
                                    third_source=row.third_source,
                                    content_type=row.content_type,
-                                   news_type=row.type,
+                                   news_type=row.news_type,
                                    is_video=row.is_video,
-                                   create_time=ct_datetime,
-                                   utc_create_time=utc_ct_datetime,
+                                   video_time=row.video_time,
+                                   update_time=ut_datetime,
+                                   utc_update_time=utc_ut_datetime,
                                    dt=row.dt)
                 batch_news.append(doc)
             elif row.third_source in args.third_video_source:
                 doc = ei_video.News(news_id=row.news_id,
                                     title=row.title,
                                     content=row.content,
+                                    news_tag=row.news_tag,
                                     source=row.source,
                                     info_url=row.info_url,
-                                    large_pic=row.large_pic,
-                                    mini_pic=row.mini_pic,
+                                    https_url=row.https_url,
+                                    large_pic=large_pic,
+                                    mini_pic=mini_pic,
                                     third_source=row.third_source,
                                     content_type=row.content_type,
-                                    news_type=row.type,
+                                    news_type=row.news_type,
                                     is_video=row.is_video,
-                                    create_time=ct_datetime,
-                                    utc_create_time=utc_ct_datetime,
+                                    video_time=row.video_time,
+                                    update_time=ut_datetime,
+                                    utc_update_time=utc_ut_datetime,
                                     dt=row.dt)
                 batch_videos.append(doc)
             #batch_news_or_videos.append(doc)
@@ -180,7 +203,7 @@ def main(args):
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=50000)
+    parser.add_argument('--batch_size', type=int, default=10000)
     parser.add_argument('--days_num', type=int, default=1)
     parser.add_argument('--end_date', type=str, default='2019-10-15')
     parser.add_argument('--news_index_name', type=str, default='news')
