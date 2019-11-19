@@ -51,7 +51,7 @@ class Dataset(object):
 
     def _prepare_data(self):
         """获取相应的数据，并返回迭代器（以partition为单位）."""
-        df = self.spark.sql(f"select news_id,title,content,news_tag,source,info_url,https_url,"
+        df = self.spark.sql(f"select news_id,title,content,news_tag,source,pure_url,https_url,"
                             f"large_pic,mini_pic,third_source,content_type,type as news_type,"
                             f"is_video,video_time,update_time,dt from " +
                             f"mlg.info_browser where dt>='{self.start_date}'" +
@@ -137,8 +137,7 @@ def main(args):
                              number_of_shards=args.number_of_shards,
                              number_of_replicas=args.number_of_replicas)
     for batch_data in tqdm(ds.iter_data(), total=ds.partition_num):
-        batch_news, batch_videos = [], []
-        #batch_news_or_videos = []
+        batch_news_or_videos = []
         for row in batch_data:
             # 转utc时间，方便在kibana中查询
             time_format = f'%Y-%m-%d %H:%M:%S'
@@ -158,47 +157,28 @@ def main(args):
                     mini_pic += ';'
             # 创建文档
             if row.third_source in args.third_news_source:
-                doc = ei_news.News(news_id=row.news_id,
-                                   title=row.title,
-                                   content=row.content,
-                                   news_tag=row.news_tag,
-                                   source=row.source,
-                                   info_url=row.info_url,
-                                   https_url=row.https_url,
-                                   large_pic=large_pic,
-                                   mini_pic=mini_pic,
-                                   third_source=row.third_source,
-                                   content_type=row.content_type,
-                                   news_type=row.news_type,
-                                   is_video=row.is_video,
-                                   video_time=row.video_time,
-                                   update_time=ut_datetime,
-                                   utc_update_time=utc_ut_datetime,
-                                   dt=row.dt)
-                batch_news.append(doc)
+                News = ei_news.News
             elif row.third_source in args.third_video_source:
-                doc = ei_video.News(news_id=row.news_id,
-                                    title=row.title,
-                                    content=row.content,
-                                    news_tag=row.news_tag,
-                                    source=row.source,
-                                    info_url=row.info_url,
-                                    https_url=row.https_url,
-                                    large_pic=large_pic,
-                                    mini_pic=mini_pic,
-                                    third_source=row.third_source,
-                                    content_type=row.content_type,
-                                    news_type=row.news_type,
-                                    is_video=row.is_video,
-                                    video_time=row.video_time,
-                                    update_time=ut_datetime,
-                                    utc_update_time=utc_ut_datetime,
-                                    dt=row.dt)
-                batch_videos.append(doc)
-            #batch_news_or_videos.append(doc)
-        #bulk(connections.get_connection(), (d.to_dict(True) for d in batch_news_or_videos))
-        bulk(connections.get_connection(), (d.to_dict(True) for d in batch_news))
-        bulk(connections.get_connection(), (d.to_dict(True) for d in batch_videos))
+                News = ei_video.News
+            doc = News(news_id=row.news_id,
+                       title=row.title,
+                       content=row.content,
+                       news_tag=row.news_tag,
+                       source=row.source,
+                       info_url=row.pure_url,
+                       https_url=row.https_url,
+                       large_pic=large_pic,
+                       mini_pic=mini_pic,
+                       third_source=row.third_source,
+                       content_type=row.content_type,
+                       news_type=row.news_type,
+                       is_video=row.is_video,
+                       video_time=row.video_time,
+                       update_time=ut_datetime,
+                       utc_update_time=utc_ut_datetime,
+                       dt=row.dt)
+            batch_news_or_videos.append(doc)
+        bulk(connections.get_connection(), (d.to_dict(True) for d in batch_news_or_videos))
 
 
 def parse_arguments():

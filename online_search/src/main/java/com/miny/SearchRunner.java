@@ -8,7 +8,6 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.miny.dto.NewsDoc;
 import com.miny.engine.EsEngine;
-import com.miny.service.EsRestService;
 
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
