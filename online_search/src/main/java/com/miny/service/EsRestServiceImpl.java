@@ -27,9 +27,6 @@ public class EsRestServiceImpl implements EsRestService {
     @Autowired
     EsEngine esEngine;
 
-    @Value("${elastic.index}")
-    String indexName;
-
     /**
      * 资讯索引的名称
      */

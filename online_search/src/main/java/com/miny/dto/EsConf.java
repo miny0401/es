@@ -1,5 +1,7 @@
 package com.miny.dto;
 
+import java.util.List;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -17,7 +19,7 @@ public class EsConf{
     /**
      * ElasticSearch server IP
      */
-    private String host;
+    private List<String> host;
 
     /**
      * ElasticSearch server端口

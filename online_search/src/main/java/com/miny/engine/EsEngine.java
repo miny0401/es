@@ -83,8 +83,13 @@ public class EsEngine {
      * @return RestHighLevelClient
      */
     private RestHighLevelClient getEsRestClient() {
+        List<HttpHost> httpHosts = new ArrayList<HttpHost>();
+        for (String host : esConf.getHost()) {
+            HttpHost httpHost = new HttpHost(host, esConf.getPort(), esConf.getSchema());
+            httpHosts.add(httpHost);
+        }
         return new RestHighLevelClient(
-            RestClient.builder(new HttpHost(esConf.getHost(), esConf.getPort(), esConf.getSchema())));
+            RestClient.builder((HttpHost[])httpHosts.toArray(new HttpHost[0])));
     }
 
     /**
@@ -124,7 +129,8 @@ public class EsEngine {
         getIndexRequest.indices(indexName);
         getIndexRequest.includeDefaults(true);
         try{
-            GetIndexResponse getIndexResponse = getEsRestClient().indices().get(getIndexRequest, RequestOptions.DEFAULT);
+            GetIndexResponse getIndexResponse = getEsRestClient().indices().get(
+                getIndexRequest, RequestOptions.DEFAULT);
             Set<String> infoKeys = getIndexResponse.getSettings().get(indexName).keySet();
             for (String infoKey : infoKeys) {
                 String value = getIndexResponse.getSetting(indexName, infoKey);
@@ -235,7 +241,8 @@ public class EsEngine {
         //deleteRequest.indicesOptions(IndicesOptions.lenientExpand());
         Boolean ret = false;
         try {
-            AcknowledgedResponse deleteResponse = client.indices().delete(deleteRequest, RequestOptions.DEFAULT);
+            AcknowledgedResponse deleteResponse = client.indices().delete(
+                deleteRequest, RequestOptions.DEFAULT);
             ret = deleteResponse.isAcknowledged();
         } catch (IOException e) {
             logger.error("Delete index {} failed!!!", indexName);
@@ -278,7 +285,8 @@ public class EsEngine {
         // 搜索
         ArrayList<Map<String, Object>> resultList = new ArrayList<>();
         try {
-            SearchResponse searchResponse = getEsRestClient().search(searchRequest, RequestOptions.DEFAULT);
+            SearchResponse searchResponse = getEsRestClient().search(
+                searchRequest, RequestOptions.DEFAULT);
             SearchHits hits = searchResponse.getHits();
             SearchHit[] searchHits = hits.getHits();
             for (SearchHit searchHit : searchHits) {
