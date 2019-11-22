@@ -1,12 +1,8 @@
-/opt/anaconda3/envs/dl/bin/python es_batch_insert_offline.py \
-    --end_date '2019-11-20' \
+/opt/anaconda3/envs/dl/bin/python es_periodical_update.py \
     --batch_size 10000 \
-    --days_num 300 \
     --news_index_name app_browser_search_news \
     --video_index_name app_browser_search_videos \
-    --hosts 172.16.0.115:9200 \
-    --number_of_shards 6 \
-    --number_of_replicas 1 \
+    --host 172.16.0.115:9200 \
     --third_news_source wangyi \
     --third_news_source yidian_news \
     --third_video_source rabbit

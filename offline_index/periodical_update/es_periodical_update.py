@@ -4,8 +4,9 @@ from tqdm import tqdm
 from datetime import datetime, timedelta
 from pyspark import SparkConf
 from pyspark.sql import SparkSession
-from elasticsearch.helpers import bulk
-from elasticsearch_dsl import connections
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk, scan
+from elasticsearch_dsl import connections, Q, Search
 from elasticsearch_dsl import Index, Document, Text, Keyword, Date, Long
 
 
@@ -28,20 +29,35 @@ def create_spark():
 
 
 class Dataset(object):
-    """数据集：专门用于将历史的资讯输入到elasticsearch中."""
-    def __init__(self, spark: SparkSession, start_date: str, end_date: str,
-                 batch_size: int, third_source: list):
+    """数据集：专门用于将更新的资讯输入到elasticsearch中."""
+    def __init__(self, spark: SparkSession, batch_size: int, third_source: list):
         self.spark = spark
         self.batch_size = batch_size
         self.third_source = third_source
-        self.end_date = end_date
-        self.start_date = start_date
+        today_datetime = datetime.now()
+        yesterday_datetime = today_datetime - timedelta(days=1)
+        self.today = today_datetime.strftime(f'%Y-%m-%d')
+        self.yesterday = yesterday_datetime.strftime(f'%Y-%m-%d')
         self._prepare_data()
     
-    def iter_data(self):
+    def iter_data(self, inserted_ids):
+        """根据es里已经插入的news_id，把未插入的news_id封装成一个个批次返回."""
+        today_count, yesterday_count = 0, 0
+        for collected_data in self._iter_data(inserted_ids, self.yesterday_iter):
+            yesterday_count += len(collected_data)
+            yield collected_data
+        for collected_data in self._iter_data(inserted_ids, self.today_iter):
+            today_count += len(collected_data)
+            yield collected_data
+        logging.info(f"There are {today_count} today news and {yesterday_count} "
+                     f"yesterday news that are new inserted.")
+
+    def _iter_data(self, inserted_ids, iterator):
         """获取数据的生成器，以`self.batch_size`为一个数据."""
         collect_data = []
-        for row in self.iter:
+        for row in iterator:
+            if row.news_id in inserted_ids:
+                continue
             collect_data.append(row)
             if len(collect_data) >= self.batch_size:
                 yield collect_data.copy()
@@ -51,35 +67,54 @@ class Dataset(object):
 
     def _prepare_data(self):
         """获取相应的数据，并返回迭代器（以partition为单位）."""
-        df = self.spark.sql(f"select news_id,title,content,news_tag,source,pure_url,https_url,"
-                            f"large_pic,mini_pic,third_source,content_type,type as news_type,"
-                            f"is_video,video_time,update_time,dt,nickname,info_url from " +
-                            f"mlg.info_browser where dt>='{self.start_date}'" +
-                            f" and dt<='{self.end_date}'")
-        # 根据资讯源及视频源的要求过滤
-        df = df.filter(df['third_source'].isin(*self.third_source)).cache()
-        self.count = df.count()
-        logging.info(f"There are {self.count} news.")
-        self.partition_num = (self.count - 1) // self.batch_size + 1
-        df = df.repartition(self.partition_num)
-        self.iter = df.toLocalIterator()
+        today_df = self.spark.sql(f"select news_id,title,content,news_tag,source,pure_url,"
+                                  f"https_url,large_pic,mini_pic,third_source,content_type,"
+                                  f"type as news_type,is_video,video_time,update_time,dt from "
+                                  f"mlg.info_browser where dt='{self.today}'")
+        yesterday_df = self.spark.sql(f"select news_id,title,content,news_tag,source,pure_url,"
+                                      f"https_url,large_pic,mini_pic,third_source,content_type,"
+                                      f"type as news_type,is_video,video_time,update_time,dt "
+                                      f"from mlg.info_browser where dt='{self.yesterday}'")
+        today_df = today_df.filter(
+            today_df['third_source'].isin(*self.third_source)).cache()
+        yesterday_df = yesterday_df.filter(
+            yesterday_df['third_source'].isin(*self.third_source)).cache()
+        today_count, yesterday_count = today_df.count(), yesterday_df.count()
+        logging.info(f"Today has {today_count} news, Yesterday has {yesterday_count} news.")
+        today_partition_num = (today_count - 1) // self.batch_size + 1
+        yesterday_partition_num = (yesterday_count - 1) // self.batch_size + 1
+        if today_partition_num > 0:
+            today_df = today_df.repartition(today_partition_num)
+        if yesterday_partition_num > 0:
+            yesterday_df = yesterday_df.repartition(yesterday_partition_num)
+        self.today_iter = today_df.toLocalIterator()
+        self.yesterday_iter = yesterday_df.toLocalIterator()
+        self.partition_num = today_partition_num + yesterday_partition_num
 
 
 class ElasticInsert(object):
-    """此类为工具类，用于将历史的资讯插入至elasticsearch中."""
-    def __init__(self, index_name: str, using: str = 'default',
-                 number_of_shards: int = 3, number_of_replicas: int = 1):
-        self.using = using
+    """此类为工具类，用于将更新的资讯插入至elasticsearch中."""
+    def __init__(self, client, index_name: str):
+        self.client = client
         self.index_name = index_name
-        self.number_of_shards = number_of_shards
-        self.number_of_replicas = number_of_replicas
-        self.index = Index(name=self.index_name, using=self.using)
-        self.index.settings(number_of_shards=self.number_of_shards,
-                            number_of_replicas=self.number_of_replicas)
+        self.index = Index(name=self.index_name, using=self.client)
         self._init()
- 
-    def create_document(self, **kwargs):
-        return self.News(kwargs)
+
+    def get_news_ids(self, dt: str):
+        """取出给定日期的news_id集合，从而可以判断哪些资讯已插入，从而只插入新资讯."""
+        scan_generator = scan(self.client, query={'query': {'match': {'dt': dt}}},
+                              index=self.index_name, _source=['news_id'])
+        news_ids = set()
+        news_id_list = list()
+        for item in scan_generator:
+            news_id = item['_source']['news_id']
+            news_ids.add(news_id)
+            news_id_list.append(news_id)
+        if len(news_ids) != len(news_id_list):
+            logging.warning(f"There are {len(news_id_list)-len(news_ids)} news " +
+                            f"repeatedly inserted.")
+        logging.info(f"There are {len(news_ids)} news in index {self.index_name} on {dt}")
+        return news_ids
 
     def _init(self):
         self._document()
@@ -112,31 +147,25 @@ class ElasticInsert(object):
         self.News = News
 
 
+
 def main(args):
     # 1. 初始化 logging
     logging.basicConfig(level=logging.INFO)
     # 2. 初始化 ElasticSearch
-    connections.create_connection(alias='default', hosts=args.hosts)
+    client = Elasticsearch(hosts=args.hosts)
     # 3. 创建 spark context
     spark = create_spark()
-    # 4. 确定插入数据的日期
-    end_date_structed = datetime.strptime(args.end_date, f'%Y-%m-%d')
-    start_date_structed = end_date_structed - timedelta(days=args.days_num)
-    end_date = end_date_structed.strftime(f'%Y-%m-%d')
-    start_date = start_date_structed.strftime(f'%Y-%m-%d')
-    logging.info(f"Inserting data from {start_date} to {end_date}")
-    # 5. 创建 Dataset 类，用于从hive中收集相应日期内的数据
-    ds = Dataset(spark, start_date, end_date, batch_size=args.batch_size,
-                 third_source=args.third_source)
-    # 6.1 创建相应的index（如果未创建），并设置相应的参数
-    # 6.2 批量插入数据
-    ei_news = ElasticInsert(args.news_index_name, using='default',
-                            number_of_shards=args.number_of_shards,
-                            number_of_replicas=args.number_of_replicas)
-    ei_video = ElasticInsert(args.video_index_name, using='default',
-                             number_of_shards=args.number_of_shards,
-                             number_of_replicas=args.number_of_replicas)
-    for batch_data in tqdm(ds.iter_data(), total=ds.partition_num):
+    # 4. 创建 Dataset 类，用于从hive中收集相应日期内的数据
+    ds = Dataset(spark, batch_size=args.batch_size, third_source=args.third_source)
+    # 5. es环境
+    ei_news = ElasticInsert(client, args.news_index_name)
+    ei_video = ElasticInsert(client, args.video_index_name)
+    yesterday_ids = ei_news.get_news_ids(dt=ds.yesterday) | ei_video.get_news_ids(dt=ds.yesterday)
+    today_ids = ei_news.get_news_ids(dt=ds.today) | ei_video.get_news_ids(dt=ds.today)
+    inserted_ids = yesterday_ids | today_ids
+    print(len(inserted_ids))
+
+    for batch_data in tqdm(ds.iter_data(inserted_ids), total=ds.partition_num):
         batch_news_or_videos = []
         for row in batch_data:
             # 转utc时间，方便在kibana中查询
@@ -168,8 +197,8 @@ def main(args):
                        title=row.title,
                        content=row.content,
                        news_tag=row.news_tag,
-                       source=source,
-                       info_url=info_url,
+                       source=row.source,
+                       info_url=row.pure_url,
                        https_url=row.https_url,
                        large_pic=large_pic,
                        mini_pic=mini_pic,
@@ -182,19 +211,15 @@ def main(args):
                        utc_update_time=utc_ut_datetime,
                        dt=row.dt)
             batch_news_or_videos.append(doc)
-        bulk(connections.get_connection(), (d.to_dict(True) for d in batch_news_or_videos))
+        bulk(client, (d.to_dict(True) for d in batch_news_or_videos))
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=10000)
-    parser.add_argument('--days_num', type=int, default=1)
-    parser.add_argument('--end_date', type=str, default='2019-10-15')
-    parser.add_argument('--news_index_name', type=str, default='news')
-    parser.add_argument('--video_index_name', type=str, default='video')
+    parser.add_argument('--news_index_name', type=str, default='app_browser_search_news')
+    parser.add_argument('--video_index_name', type=str, default='app_browser_search_videos')
     parser.add_argument('--hosts', action='append', type=str)
-    parser.add_argument('--number_of_shards', type=int, default=3)
-    parser.add_argument('--number_of_replicas', type=int, default=1)
     parser.add_argument('--third_news_source', action='append', type=str)
     parser.add_argument('--third_video_source', action='append', type=str)
     return parser.parse_args()

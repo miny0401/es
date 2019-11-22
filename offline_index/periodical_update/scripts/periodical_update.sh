@@ -13,9 +13,7 @@ spark-submit \
 --executor-memory 4g \
 --driver-memory 4g \
 es_batch_insert_offline.py \
-    --end_date '2019-10-15' \
     --batch_size 10000 \
-    --days_num 1 \
     --news_index_name app_browser_search_news \
     --video_index_name app_browser_search_videos \
     --host 192.168.22.137:9200 \
@@ -24,8 +22,6 @@ es_batch_insert_offline.py \
     --host 192.168.25.40:9200 \
     --host 192.168.22.42:9200 \
     --host 192.168.25.62:9200 \
-    --number_of_shards 6 \
-    --number_of_replicas 1 \
     --third_news_source wangyi \
     --third_news_source yidian_news \
     --third_video_source rabbit
